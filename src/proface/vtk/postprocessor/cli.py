@@ -4,7 +4,8 @@
 
 
 import dataclasses
-import os
+import pathlib
+import sys
 
 import h5py  # type: ignore[import-untyped]
 import meshio  # type: ignore[import-untyped]
@@ -15,20 +16,37 @@ from proface.vtk.postprocessor.mesh import Mesh, topotable
 
 @dataclasses.dataclass
 class Config:
-    out: os.PathLike  # output VTU file (.vtu)
-    fea: os.PathLike  # input FEA file (.h5)
-    pfa: os.PathLike | None = None  # input PFA file (.h5)
+    """ProFACE to VTU translator."""
+
+    out: pathlib.Path
+    """output VTU file (.vtu)"""
+
+    fea: pathlib.Path
+    """input FEA file (.h5)"""
+
+    pfa: pathlib.Path | None = None
+    """input PfA file (.h5) [optional]"""
 
 
 def main() -> int:
     config = tyro.cli(Config)
 
-    with h5py.File(config.fea) as h5:
-        inmesh = Mesh(h5)
+    try:
+        with h5py.File(config.fea) as h5:
+            inmesh = Mesh(h5)
+    except (OSError, ValueError) as err:
+        print(f"Unable to parse FEA file '{config.fea}'", file=sys.stderr)
+        print(err, file=sys.stderr)
+        return 1
 
     if config.pfa is not None:
-        with h5py.File(config.pfa) as h5:
-            inmesh.load_results(h5)
+        try:
+            with h5py.File(config.pfa) as h5:
+                inmesh.load_results(h5)
+        except (OSError, ValueError) as err:
+            print(f"Unable to parse PfA file '{config.pfa}'", file=sys.stderr)
+            print(err, file=sys.stderr)
+            return 1
 
     mesh = meshio.Mesh(
         points=inmesh.points,

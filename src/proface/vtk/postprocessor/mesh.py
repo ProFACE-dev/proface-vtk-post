@@ -37,12 +37,22 @@ class Mesh:
         self.cell_data: dict[str, list[NDArrVals]] = {}
 
         # populate points and point_ids
-        self.points = np.asarray(h5["nodes"]["coordinates"], dtype=dtype_fl)
-        self.point_ids = np.asarray(h5["nodes"]["numbers"], dtype=dtype_id)
-        assert len(self.points) == len(self.point_ids)
-        assert np.all(self.point_ids[:-1] < self.point_ids[1:]), (
-            "point ids are not strictly sorted"
-        )
+        try:
+            self.points = np.asarray(h5["nodes"]["coordinates"], dtype=dtype_fl)
+            self.point_ids = np.asarray(h5["nodes"]["numbers"], dtype=dtype_id)
+        except KeyError as err:
+            msg = f"Invalid mesh file structure: {err}"
+            raise ValueError(msg) from err
+
+        if len(self.points) != len(self.point_ids):
+            msg = (
+                "nodes/coordinates and nodes/number "
+                "do not have same cardinality"
+            )
+            raise ValueError(msg)
+        if not np.all(self.point_ids[:-1] < self.point_ids[1:]):
+            msg = "point ids are not strictly sorted"
+            raise ValueError(msg)
 
         # populate cells
         for abq_topo, dataset in h5["elements"].items():
@@ -79,17 +89,29 @@ class Mesh:
 
     def load_results(self, h5: h5py.File) -> None:
         """load Local results from h5 file"""
-        if "Local" not in h5["ProFACE"]:
-            return
-        loc = h5["ProFACE"]["Local"]
+
+        try:
+            loc = h5["ProFACE"]["Local"]
+        except KeyError as err:
+            msg = f"Invalid results file structure: {err}"
+            raise ValueError(msg) from err
+
         for k in loc:
             for v in loc[k]:
                 name = f"{k}::{v}"
                 self.cell_data[name] = []
                 for e, m in self.cells:
-                    ds = loc[k][v]["integration_point"][e]
-                    assert len(ds) == len(m)
-                    assert np.ndim(ds) == 2
+                    try:
+                        ds = loc[k][v]["integration_point"][e]
+                    except KeyError as err:
+                        msg = f"Incomplete ProFACE results: {err}"
+                        raise ValueError(msg) from err
+                    if len(ds) != len(m) or np.ndim(ds) != 2:
+                        msg = (
+                            "Invalid ProFACE results "
+                            f"'{k}/{v}/integration_point/{e}'"
+                        )
+                        raise ValueError(msg)
                     self.cell_data[name].append(
                         np.mean(np.asarray(ds, dtype=dtype_fl), axis=1)
                     )
