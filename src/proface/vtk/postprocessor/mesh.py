@@ -21,9 +21,10 @@ topotable = {
     "C3D20": "hexahedron20",
 }
 
+dtype_bool = np.uint8
 dtype_id = np.int32
 dtype_fl = np.float32
-NDArrVals = npt.NDArray[dtype_fl]
+NDArrVals = npt.NDArray[dtype_fl | dtype_bool]
 NDArrIds = npt.NDArray[dtype_id]
 
 
@@ -34,6 +35,7 @@ class Mesh:
         self.points: NDArrVals
         self.point_ids: npt.NDArrIds
         self.cells: list[tuple[str, NDArrIds]] = []
+        self.cell_ids: list[NDArrIds] = []
         self.cell_data: dict[str, list[NDArrVals]] = {}
 
         # populate points and point_ids
@@ -59,6 +61,7 @@ class Mesh:
             self.cells.append(
                 (abq_topo, np.asarray(dataset["incidences"], dtype=dtype_id))
             )
+            self.cell_ids.append(np.asarray(dataset["numbers"], dtype=dtype_id))
 
     @property
     def n_points(self) -> int:
@@ -115,3 +118,21 @@ class Mesh:
                     self.cell_data[name].append(
                         np.mean(np.asarray(ds, dtype=dtype_fl), axis=1)
                     )
+
+    def elset_to_cell_data(self, h5: h5py.File) -> None:
+        """load element sets as binary 1/0 cell data"""
+
+        try:
+            elsets = h5["sets"]["element"]
+        except KeyError as err:
+            msg = f"Invalid mesh file structure: {err}"
+            raise ValueError(msg) from err
+
+        for k, v in elsets.items():
+            name = f"ElSet::{k}"
+            self.cell_data[name] = []
+            for (e, m), i in zip(self.cells, self.cell_ids, strict=True):
+                ds = np.zeros((len(m),), dtype=dtype_bool)
+                assert ds.shape == i.shape
+                ds[np.isin(i, v, assume_unique=True)] = 1
+                self.cell_data[name].append(ds)
