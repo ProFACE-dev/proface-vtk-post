@@ -17,6 +17,7 @@ topotable = {
     "C3D6": "wedge",
     "C3D8": "hexahedron",
     "C3D10": "tetra10",
+    "C3D13": "pyramid13",
     "C3D15": "wedge15",
     "C3D20": "hexahedron20",
 }
