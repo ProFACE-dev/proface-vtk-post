@@ -30,13 +30,20 @@ class Config:
     save_elsets: bool = True
     """save element sets as cell data"""
 
+    save_nodesets: bool = True
+    """save nodesets as point data"""
+
 
 def main() -> int:
     config = tyro.cli(Config)
 
     try:
         with h5py.File(config.fea) as h5:
-            inmesh = Mesh(h5, load_elsets=config.save_elsets)
+            inmesh = Mesh(
+                h5,
+                load_elsets=config.save_elsets,
+                load_nodesets=config.save_nodesets,
+            )
     except (OSError, ValueError) as err:
         print(f"Unable to parse FEA file '{config.fea}'", file=sys.stderr)
         print(err, file=sys.stderr)
@@ -61,6 +68,7 @@ def main() -> int:
             for abq_topo, conn in inmesh.cells_zerobased()
         ],
         cell_data=inmesh.cell_data,
+        point_data=inmesh.point_data,
     )
     mesh.write(config.out, file_format="vtu", binary=True, compression="zlib")
     print(config.out)

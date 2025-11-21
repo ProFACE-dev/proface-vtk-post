@@ -31,9 +31,16 @@ NDArrIds = npt.NDArray[dtype_id]
 class Mesh:
     """Container for ProFACE mesh object, as saved in neutral h5 format"""
 
-    def __init__(self, h5: h5py.File, *, load_elsets: bool = False) -> None:
+    def __init__(
+        self,
+        h5: h5py.File,
+        *,
+        load_elsets: bool = False,
+        load_nodesets: bool = False,
+    ) -> None:
         self.points: NDArrVals
         self.point_ids: npt.NDArrIds
+        self.point_data: dict[str, NDArrVals] = {}
         self.cells: list[tuple[str, NDArrIds]] = []
         self.cell_ids: list[NDArrIds] = []
         self.cell_data: dict[str, list[NDArrVals]] = {}
@@ -64,7 +71,12 @@ class Mesh:
             self.cell_ids.append(np.asarray(dataset["numbers"], dtype=dtype_id))
 
         # fake elsets with cell data
-        self._elset_to_cell_data(h5)
+        if load_elsets:
+            self._elset_to_cell_data(h5)
+
+        # fake nodesets with point data
+        if load_nodesets:
+            self._nodeset_to_point_data(h5)
 
     @property
     def n_points(self) -> int:
@@ -139,3 +151,18 @@ class Mesh:
                 assert ds.shape == i.shape
                 ds[np.isin(i, v, assume_unique=True)] = 1
                 self.cell_data[name].append(ds)
+
+    def _nodeset_to_point_data(self, h5: h5py.File) -> None:
+        """load node sets as binary 1/0 point data"""
+
+        try:
+            nodesets = h5["sets"]["node"]
+        except KeyError as err:
+            msg = f"Invalid mesh file structure: {err}"
+            raise ValueError(msg) from err
+
+        for k, v in nodesets.items():
+            name = f"NSet::{k}"
+            ds = np.zeros((len(self.points),), dtype=dtype_bool)
+            ds[np.isin(self.point_ids, v, assume_unique=True)] = 1
+            self.point_data[name] = ds
