@@ -31,7 +31,7 @@ NDArrIds = npt.NDArray[dtype_id]
 class Mesh:
     """Container for ProFACE mesh object, as saved in neutral h5 format"""
 
-    def __init__(self, h5: h5py.File) -> None:
+    def __init__(self, h5: h5py.File, *, load_elsets: bool = False) -> None:
         self.points: NDArrVals
         self.point_ids: npt.NDArrIds
         self.cells: list[tuple[str, NDArrIds]] = []
@@ -62,6 +62,9 @@ class Mesh:
                 (abq_topo, np.asarray(dataset["incidences"], dtype=dtype_id))
             )
             self.cell_ids.append(np.asarray(dataset["numbers"], dtype=dtype_id))
+
+        # fake elsets with cell data
+        self._elset_to_cell_data(h5)
 
     @property
     def n_points(self) -> int:
@@ -119,7 +122,7 @@ class Mesh:
                         np.mean(np.asarray(ds, dtype=dtype_fl), axis=1)
                     )
 
-    def elset_to_cell_data(self, h5: h5py.File) -> None:
+    def _elset_to_cell_data(self, h5: h5py.File) -> None:
         """load element sets as binary 1/0 cell data"""
 
         try:

@@ -36,9 +36,7 @@ def main() -> int:
 
     try:
         with h5py.File(config.fea) as h5:
-            inmesh = Mesh(h5)
-            if config.save_elsets:
-                inmesh.elset_to_cell_data(h5)
+            inmesh = Mesh(h5, load_elsets=config.save_elsets)
     except (OSError, ValueError) as err:
         print(f"Unable to parse FEA file '{config.fea}'", file=sys.stderr)
         print(err, file=sys.stderr)
