@@ -179,7 +179,7 @@ wheels = [
 
 [[package]]
 name = "proface-vtk-post"
-version = "0.1.0b2.dev1"
+version = "0.1.0b2"
 source = { editable = "." }
 dependencies = [
     { name = "h5py" },
