@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-
+import argparse
 import dataclasses
 import pathlib
 import sys
@@ -11,6 +11,7 @@ import h5py  # type: ignore[import-untyped]
 import meshio  # type: ignore[import-untyped]
 import tyro
 
+from proface.vtk.postprocessor import __version__
 from proface.vtk.postprocessor.mesh import Mesh, topotable
 
 
@@ -35,7 +36,13 @@ class Config:
 
 
 def main() -> int:
-    config = tyro.cli(Config)
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    _, remaining = parser.parse_known_args()
+
+    config = tyro.cli(Config, args=remaining)
 
     try:
         with h5py.File(config.fea) as h5:
