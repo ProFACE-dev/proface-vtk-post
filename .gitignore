@@ -12,3 +12,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# hatch-vcs generated file
+src/proface/vtk/postprocessor/_version.py

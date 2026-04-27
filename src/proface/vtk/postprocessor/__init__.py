@@ -2,10 +2,9 @@
 #
 # SPDX-License-Identifier: MIT
 
-from importlib.metadata import PackageNotFoundError, version
+__all__ = ["__version__"]
 
 try:
-    # FIXME: check this is the same as pyproject.toml -> project.version
-    __version__ = version("proface-vtk-post")
-except PackageNotFoundError:
-    __version__ = "0.0.0"
+    from ._version import __version__
+except ImportError:
+    __version__ = "0+unknown"

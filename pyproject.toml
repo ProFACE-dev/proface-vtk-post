@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 [project]
+dynamic = ["version"]
 name = "proface-vtk-post"
-version = "0.1.0b2"
 description = "ProFACE to VTK postprocessor"
 readme = "README.md"
 authors = [
@@ -22,22 +22,27 @@ license = "MIT"
 [project.scripts]
 proface-vtu = "proface.vtk.postprocessor.cli:main"
 
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
     "mypy>=1.18.2",
 ]
 
-[build-system]
-requires = ["uv_build>=0.9.9,<0.10.0"]
-build-backend = "uv_build"
-
 #
-# uv
+# hatch
 #
-[tool.uv.build-backend]
-module-name = "proface.vtk.postprocessor"
-module-root = "src"
+[tool.hatch.version]
+source = "vcs"
+[tool.hatch.version.raw-options]
+version_scheme = "release-branch-semver"
+local_scheme = "node-and-date"
+[tool.hatch.build.hooks.vcs]
+version-file = "src/proface/vtk/postprocessor/_version.py"
+[tool.hatch.build.targets.wheel]
+packages = ["src/proface"]
 
 #
 # ruff
@@ -57,3 +62,7 @@ ignore = ["S101"]
 explicit_package_bases = true
 namespace_packages = true
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+
+[[tool.mypy.overrides]]
+module = ["proface.vtk.postprocessor._version"]
+ignore_missing_imports = true
