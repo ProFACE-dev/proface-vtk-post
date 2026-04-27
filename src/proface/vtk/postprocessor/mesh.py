@@ -25,7 +25,7 @@ topotable = {
 dtype_bool = np.uint8
 dtype_id = np.int32
 dtype_fl = np.float32
-NDArrVals = npt.NDArray[dtype_fl | dtype_bool]
+NDArrVals = npt.NDArray[dtype_fl | dtype_bool | dtype_id]
 NDArrIds = npt.NDArray[dtype_id]
 
 
@@ -135,6 +135,32 @@ class Mesh:
                         np.mean(np.asarray(ds, dtype=dtype_fl), axis=1)
                     )
 
+    def load_fea_results(self, h5: h5py.File) -> None:
+        """load neutral FEA results from h5 file"""
+
+        try:
+            results = h5["results"]
+        except KeyError as err:
+            msg = f"Invalid FEA results file structure: {err}"
+            raise ValueError(msg) from err
+
+        for load_case in results:
+            for quantity in results[load_case]:
+                paths = results[load_case][quantity]
+                if "integration_point" in paths:
+                    self._fea_integration_points_to_cell_data(
+                        load_case,
+                        quantity,
+                        paths["integration_point"],
+                    )
+                if "nodal_averaged" in paths:
+                    self._fea_nodal_average_to_point_data(
+                        h5,
+                        load_case,
+                        quantity,
+                        paths["nodal_averaged"],
+                    )
+
     def _elset_to_cell_data(self, h5: h5py.File) -> None:
         """load element sets as binary 1/0 cell data"""
 
@@ -167,3 +193,104 @@ class Mesh:
             ds = np.zeros((len(self.points),), dtype=dtype_bool)
             ds[np.isin(self.point_ids, v, assume_unique=True)] = 1
             self.point_data[name] = ds
+
+    def _fea_integration_points_to_cell_data(
+        self,
+        load_case: str,
+        quantity: str,
+        ip_group: h5py.Group,
+    ) -> None:
+        """average FEA integration-point data onto cells."""
+
+        name = f"FEA::{load_case}::{quantity}"
+        self.cell_data[name] = []
+        for e, m in self.cells:
+            try:
+                ds = ip_group[e]
+            except KeyError as err:
+                msg = f"Incomplete FEA results: {err}"
+                raise ValueError(msg) from err
+            values = np.asarray(ds, dtype=dtype_fl)
+            if len(values) != len(m) or values.ndim < 2:
+                msg = (
+                    "Invalid FEA results "
+                    f"'{load_case}/{quantity}/integration_point/{e}'"
+                )
+                raise ValueError(msg)
+            self.cell_data[name].append(np.mean(values, axis=1))
+
+    def _fea_nodal_average_to_point_data(
+        self,
+        h5: h5py.File,
+        load_case: str,
+        quantity: str,
+        nd_group: h5py.Group,
+    ) -> None:
+        """merge topology-specific FEA nodal averages as point data."""
+
+        try:
+            first_topology, _ = self.cells[0]
+            value_shape = nd_group[first_topology].shape[1:]
+        except IndexError as err:
+            msg = "Cannot load FEA nodal results without cells"
+            raise ValueError(msg) from err
+        except KeyError as err:
+            msg = f"Incomplete FEA results: {err}"
+            raise ValueError(msg) from err
+
+        accumulated = np.zeros(
+            (self.n_points, *value_shape),
+            dtype=dtype_fl,
+        )
+        count = np.zeros((self.n_points,), dtype=dtype_id)
+        for e, _ in self.cells:
+            try:
+                ds = nd_group[e]
+                nodes = h5["elements"][e]["nodes"]
+            except KeyError as err:
+                msg = f"Incomplete FEA results: {err}"
+                raise ValueError(msg) from err
+
+            values = np.asarray(ds, dtype=dtype_fl)
+            node_ids = np.asarray(nodes, dtype=dtype_id)
+            if len(values) != len(node_ids) or values.ndim < 1:
+                msg = (
+                    "Invalid FEA results "
+                    f"'{load_case}/{quantity}/nodal_averaged/{e}'"
+                )
+                raise ValueError(msg)
+
+            if values.shape[1:] != value_shape:
+                msg = (
+                    "Inconsistent FEA results "
+                    f"'{load_case}/{quantity}/nodal_averaged/{e}'"
+                )
+                raise ValueError(msg)
+
+            indices = self._point_indices(node_ids)
+            np.add.at(accumulated, indices, values)
+            np.add.at(count, indices, 1)
+
+        assert np.ndim(accumulated) == 1 + len(value_shape)
+        count_reshaped = count[(...,) + (np.newaxis,) * len(value_shape)]
+        np.divide(
+            accumulated,
+            count_reshaped,
+            out=accumulated,
+            where=count_reshaped != 0,
+        )
+        accumulated[count == 0] = np.nan
+
+        name = f"FEA::{load_case}::{quantity}::nodal_averaged"
+        self.point_data[name] = accumulated
+        self.point_data[f"{name}::topology_count"] = count
+
+    def _point_indices(self, point_ids: NDArrIds) -> NDArrIds:
+        indices = np.searchsorted(self.point_ids, point_ids).astype(dtype_id)
+        inside = indices < self.n_points
+        found = np.zeros_like(inside, dtype=np.bool_)
+        found[inside] = self.point_ids[indices[inside]] == point_ids[inside]
+        if not np.all(found):
+            msg = "FEA result references unknown node ids"
+            raise ValueError(msg)
+        return indices

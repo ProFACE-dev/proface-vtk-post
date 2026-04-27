@@ -34,6 +34,9 @@ class Config:
     save_nodesets: bool = True
     """save nodesets as point data"""
 
+    save_fea_results: bool = False
+    """save FEA results as cell and point data"""
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
@@ -51,6 +54,8 @@ def main() -> int:
                 load_elsets=config.save_elsets,
                 load_nodesets=config.save_nodesets,
             )
+            if config.save_fea_results:
+                inmesh.load_fea_results(h5)
     except (OSError, ValueError) as err:
         print(f"Unable to parse FEA file '{config.fea}'", file=sys.stderr)
         print(err, file=sys.stderr)
