@@ -138,27 +138,37 @@ class Mesh:
     def load_fea_results(self, h5: h5py.File) -> None:
         """load neutral FEA results from h5 file"""
 
-        try:
-            results = h5["results"]
-        except KeyError as err:
-            msg = f"Invalid FEA results file structure: {err}"
-            raise ValueError(msg) from err
+        results = h5.get("results")
+        if results is None or len(results) == 0:
+            # no results available in file
+            return
 
+        if not self.cells:
+            # only results at topology sets are supported
+            msg = "Cannot load FEA results without cells"
+            raise ValueError(msg)
+
+        (
+            nodal_average_point_indices,
+            nodal_average_topology_count,
+        ) = self._build_fea_nodal_average_topology_mapping(h5)
+        self.point_data["DEBUG::nodal_topology_count"] = (
+            nodal_average_topology_count
+        )
         for load_case in results:
-            for quantity in results[load_case]:
-                paths = results[load_case][quantity]
+            for quantity, paths in results[load_case].items():
+                name = f"FEA::{load_case}::{quantity}"
                 if "integration_point" in paths:
                     self._fea_integration_points_to_cell_data(
-                        load_case,
-                        quantity,
+                        name,
                         paths["integration_point"],
                     )
                 if "nodal_averaged" in paths:
                     self._fea_nodal_average_to_point_data(
-                        h5,
-                        load_case,
-                        quantity,
+                        name,
                         paths["nodal_averaged"],
+                        nodal_average_point_indices,
+                        nodal_average_topology_count,
                     )
 
     def _elset_to_cell_data(self, h5: h5py.File) -> None:
@@ -196,13 +206,11 @@ class Mesh:
 
     def _fea_integration_points_to_cell_data(
         self,
-        load_case: str,
-        quantity: str,
+        name: str,
         ip_group: h5py.Group,
     ) -> None:
         """average FEA integration-point data onto cells."""
 
-        name = f"FEA::{load_case}::{quantity}"
         self.cell_data[name] = []
         for e, m in self.cells:
             try:
@@ -210,30 +218,29 @@ class Mesh:
             except KeyError as err:
                 msg = f"Incomplete FEA results: {err}"
                 raise ValueError(msg) from err
-            values = np.asarray(ds, dtype=dtype_fl)
-            if len(values) != len(m) or values.ndim < 2:
-                msg = (
-                    "Invalid FEA results "
-                    f"'{load_case}/{quantity}/integration_point/{e}'"
-                )
+            if len(ds) != len(m) or ds.ndim < 2:
+                msg = f"Invalid FEA results '{ds.name}'"
                 raise ValueError(msg)
+            # data structure:
+            # axis0 -> element number
+            # axis1 -> integration point number
+            # axis2 (if present) -> vector/tensor component number
+            values = np.asarray(ds, dtype=dtype_fl)
+            # cell data is obtained by averaging over integration points
             self.cell_data[name].append(np.mean(values, axis=1))
 
     def _fea_nodal_average_to_point_data(
         self,
-        h5: h5py.File,
-        load_case: str,
-        quantity: str,
+        name: str,
         nd_group: h5py.Group,
+        point_indices_by_topology: tuple[NDArrIds, ...],
+        topology_count: NDArrIds,
     ) -> None:
         """merge topology-specific FEA nodal averages as point data."""
 
+        first_topology, _ = self.cells[0]
         try:
-            first_topology, _ = self.cells[0]
             value_shape = nd_group[first_topology].shape[1:]
-        except IndexError as err:
-            msg = "Cannot load FEA nodal results without cells"
-            raise ValueError(msg) from err
         except KeyError as err:
             msg = f"Incomplete FEA results: {err}"
             raise ValueError(msg) from err
@@ -242,55 +249,84 @@ class Mesh:
             (self.n_points, *value_shape),
             dtype=dtype_fl,
         )
-        count = np.zeros((self.n_points,), dtype=dtype_id)
+        for (topology, _), point_indices in zip(
+            self.cells,
+            point_indices_by_topology,
+            strict=True,
+        ):
+            try:
+                ds = nd_group[topology]
+            except KeyError as err:
+                msg = f"Incomplete FEA results: {err}"
+                raise ValueError(msg) from err
+
+            if len(ds) != len(point_indices) or ds.ndim < 1:
+                msg = f"Invalid FEA results '{ds.name}'"
+                raise ValueError(msg)
+
+            if ds.shape[1:] != value_shape:
+                msg = f"Inconsistent FEA results '{ds.name}'"
+                raise ValueError(msg)
+
+            # data structure:
+            # axis0 -> node number
+            # axis1 (if present) -> vector/tensor component number
+            values = np.asarray(ds, dtype=dtype_fl)
+            # nodal data is obtained by averaging topology contributions
+            np.add.at(accumulated, point_indices, values)
+
+        assert np.ndim(accumulated) == 1 + len(value_shape)
+        assert np.ndim(topology_count) == 1
+        # add singleton dimensions to 'topology_count' so that it
+        # can broadcast to 'accumulated'
+        topology_count_reshaped = topology_count[
+            (...,) + (np.newaxis,) * len(value_shape)
+        ]
+        # compute actual average
+        np.divide(
+            accumulated,
+            topology_count_reshaped,
+            out=accumulated,
+            where=topology_count_reshaped != 0,
+        )
+        # and set to nan nodes with no results
+        accumulated[topology_count == 0] = np.nan
+
+        self.point_data[name] = accumulated
+
+    def _build_fea_nodal_average_topology_mapping(
+        self,
+        h5: h5py.File,
+    ) -> tuple[tuple[NDArrIds, ...], NDArrIds]:
+        """Build topology-specific nodal result mapping."""
+
+        point_indices_by_topology: list[NDArrIds] = []
+        topology_count = np.zeros((self.n_points,), dtype=dtype_id)
         for e, _ in self.cells:
             try:
-                ds = nd_group[e]
                 nodes = h5["elements"][e]["nodes"]
             except KeyError as err:
                 msg = f"Incomplete FEA results: {err}"
                 raise ValueError(msg) from err
 
-            values = np.asarray(ds, dtype=dtype_fl)
-            node_ids = np.asarray(nodes, dtype=dtype_id)
-            if len(values) != len(node_ids) or values.ndim < 1:
-                msg = (
-                    "Invalid FEA results "
-                    f"'{load_case}/{quantity}/nodal_averaged/{e}'"
-                )
-                raise ValueError(msg)
+            point_indices = self._point_indices(
+                np.asarray(nodes, dtype=dtype_id)
+            )
+            point_indices_by_topology.append(point_indices)
+            np.add.at(topology_count, point_indices, 1)
 
-            if values.shape[1:] != value_shape:
-                msg = (
-                    "Inconsistent FEA results "
-                    f"'{load_case}/{quantity}/nodal_averaged/{e}'"
-                )
-                raise ValueError(msg)
-
-            indices = self._point_indices(node_ids)
-            np.add.at(accumulated, indices, values)
-            np.add.at(count, indices, 1)
-
-        assert np.ndim(accumulated) == 1 + len(value_shape)
-        count_reshaped = count[(...,) + (np.newaxis,) * len(value_shape)]
-        np.divide(
-            accumulated,
-            count_reshaped,
-            out=accumulated,
-            where=count_reshaped != 0,
-        )
-        accumulated[count == 0] = np.nan
-
-        name = f"FEA::{load_case}::{quantity}::nodal_averaged"
-        self.point_data[name] = accumulated
-        self.point_data[f"{name}::topology_count"] = count
+        return tuple(point_indices_by_topology), topology_count
 
     def _point_indices(self, point_ids: NDArrIds) -> NDArrIds:
         indices = np.searchsorted(self.point_ids, point_ids).astype(dtype_id)
-        inside = indices < self.n_points
-        found = np.zeros_like(inside, dtype=np.bool_)
-        found[inside] = self.point_ids[indices[inside]] == point_ids[inside]
-        if not np.all(found):
+        if (
+            np.any(
+                indices == self.n_points
+            )  # insertion point past end of self.point_ids
+            or np.any(
+                self.point_ids[indices] != point_ids
+            )  # insertion point not index of point_ids
+        ):
             msg = "FEA result references unknown node ids"
             raise ValueError(msg)
         return indices
