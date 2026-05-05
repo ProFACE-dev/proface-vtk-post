@@ -4,11 +4,14 @@
 
 
 import itertools
+import logging
 from collections.abc import Iterator
 
 import h5py  # type: ignore[import-untyped]
 import numpy as np
 import numpy.typing as npt
+
+logger = logging.getLogger(__name__)
 
 # see <https://github.com/nschloe/meshio/wiki/Node-ordering-in-cells>
 topotable = {
@@ -84,6 +87,8 @@ class Mesh:
         return len(self.points)
 
     def cells_zerobased(self) -> Iterator[tuple[str, NDArrIds]]:
+        if not self.cells:
+            return
         z_num = np.arange(self.n_points, dtype=dtype_id)
         delta = self.point_ids - z_num
         if np.all(delta == delta[0]):
@@ -92,8 +97,14 @@ class Mesh:
         else:
             assert np.all(delta[:-1] <= delta[1:])
             uv, uc = np.unique_counts(delta)
+            logger.debug(
+                "Node id offset run lengths: %d / %d, quartiles=%s",
+                len(uc),
+                self.n_points,
+                np.quantile(uc, [0.25, 0.5, 0.75]),
+            )
             assert np.all(uv[:-1] < uv[1:])
-            # here we assume that uc is smallish
+            # here we assume that len(uv) is smallish
             for k, c in self.cells:
                 c = np.copy(c)
                 for d, (a, b) in zip(
@@ -101,10 +112,15 @@ class Mesh:
                     itertools.pairwise(itertools.accumulate(uc, initial=0)),
                     strict=True,
                 ):
-                    c[
-                        (c >= self.point_ids[a]) & (c <= self.point_ids[b - 1])
-                    ] -= d
+                    np.subtract(
+                        c,
+                        d,
+                        out=c,
+                        where=(c >= self.point_ids[a])
+                        & (c <= self.point_ids[b - 1]),
+                    )
                 yield k, c
+            assert b == self.n_points
 
     def load_results(self, h5: h5py.File) -> None:
         """load Local results from h5 file"""
