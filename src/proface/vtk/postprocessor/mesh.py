@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: MIT
 
 
-import itertools
 import logging
 from collections.abc import Iterator
 
@@ -69,9 +68,14 @@ class Mesh:
 
         # populate cells
         for abq_topo, dataset in h5["elements"].items():
-            self.cells.append(
-                (abq_topo, np.asarray(dataset["incidences"], dtype=dtype_id))
-            )
+            n_ids = np.asarray(dataset["incidences"], dtype=dtype_id)
+            if np.any(np.isin(n_ids, self.point_ids, invert=True)):
+                msg = (
+                    f"element incidences for {abq_topo} "
+                    "reference non existing node ids."
+                )
+                raise ValueError(msg)
+            self.cells.append((abq_topo, n_ids))
             self.cell_ids.append(np.asarray(dataset["numbers"], dtype=dtype_id))
 
         # fake elsets with cell data
@@ -89,38 +93,22 @@ class Mesh:
     def cells_zerobased(self) -> Iterator[tuple[str, NDArrIds]]:
         if not self.cells:
             return
+
         z_num = np.arange(self.n_points, dtype=dtype_id)
-        delta = self.point_ids - z_num
+        delta: NDArrIds = self.point_ids - z_num
         if np.all(delta == delta[0]):
-            for k, c in self.cells:
-                yield k, c - delta[0]
+            d: dtype_id = delta[0]
+
+            def remap(i: NDArrIds) -> NDArrIds:
+                return i - d
         else:
-            assert np.all(delta[:-1] <= delta[1:])
-            uv, uc = np.unique_counts(delta)
-            logger.debug(
-                "Node id offset run lengths: %d / %d, quartiles=%s",
-                len(uc),
-                self.n_points,
-                np.quantile(uc, [0.25, 0.5, 0.75]),
-            )
-            assert np.all(uv[:-1] < uv[1:])
-            # here we assume that len(uv) is smallish
-            for k, c in self.cells:
-                c = np.copy(c)
-                for d, (a, b) in zip(
-                    uv,
-                    itertools.pairwise(itertools.accumulate(uc, initial=0)),
-                    strict=True,
-                ):
-                    np.subtract(
-                        c,
-                        d,
-                        out=c,
-                        where=(c >= self.point_ids[a])
-                        & (c <= self.point_ids[b - 1]),
-                    )
-                yield k, c
-            assert b == self.n_points
+
+            def remap(i: NDArrIds) -> NDArrIds:
+                idx = np.searchsorted(self.point_ids, i)
+                return idx.astype(dtype_id)
+
+        for k, c in self.cells:
+            yield k, remap(c)
 
     def load_results(self, h5: h5py.File) -> None:
         """load Local results from h5 file"""
