@@ -31,6 +31,10 @@ NDArrVals = npt.NDArray[dtype_fl | dtype_bool | dtype_id]
 NDArrIds = npt.NDArray[dtype_id]
 
 
+def _is_unique(ids: NDArrIds) -> bool:
+    return ids.size == np.unique_values(ids).size
+
+
 class Mesh:
     """Container for ProFACE mesh object, as saved in neutral h5 format"""
 
@@ -69,6 +73,16 @@ class Mesh:
         # populate cells
         for abq_topo, dataset in h5["elements"].items():
             n_ids = np.asarray(dataset["incidences"], dtype=dtype_id)
+            e_ids = np.asarray(dataset["numbers"], dtype=dtype_id)
+            if len(n_ids) != len(e_ids):
+                msg = (
+                    f"element incidences and numbers for {abq_topo} "
+                    "do not have same cardinality"
+                )
+                raise ValueError(msg)
+            if not _is_unique(e_ids):
+                msg = f"element ids for {abq_topo} contain duplicate ids"
+                raise ValueError(msg)
             if np.any(np.isin(n_ids, self.point_ids, invert=True)):
                 msg = (
                     f"element incidences for {abq_topo} "
@@ -76,7 +90,7 @@ class Mesh:
                 )
                 raise ValueError(msg)
             self.cells.append((abq_topo, n_ids))
-            self.cell_ids.append(np.asarray(dataset["numbers"], dtype=dtype_id))
+            self.cell_ids.append(e_ids)
 
         # fake elsets with cell data
         if load_elsets:
@@ -131,7 +145,7 @@ class Mesh:
                     except KeyError as err:
                         msg = f"Incomplete ProFACE results: {err}"
                         raise ValueError(msg) from err
-                    if len(ds) != len(m) or np.ndim(ds) != 2:
+                    if len(ds) != len(m) or ds.ndim != 2:
                         msg = (
                             "Invalid ProFACE results "
                             f"'{k}/{v}/integration_point/{e}'"
@@ -188,11 +202,13 @@ class Mesh:
 
         for k, v in elsets.items():
             name = f"ElSet::{k}"
+            set_ids = np.asarray(v, dtype=dtype_id)
+            if not _is_unique(set_ids):
+                msg = f"element set '{k}' contains duplicate ids"
+                raise ValueError(msg)
             self.cell_data[name] = []
             for (e, m), i in zip(self.cells, self.cell_ids, strict=True):
-                ds = np.zeros((len(m),), dtype=dtype_bool)
-                assert ds.shape == i.shape
-                ds[np.isin(i, v, assume_unique=True)] = 1
+                ds = np.isin(i, set_ids, assume_unique=True).astype(dtype_bool)
                 self.cell_data[name].append(ds)
 
     def _nodeset_to_point_data(self, h5: h5py.File) -> None:
@@ -206,8 +222,13 @@ class Mesh:
 
         for k, v in nodesets.items():
             name = f"NSet::{k}"
-            ds = np.zeros((len(self.points),), dtype=dtype_bool)
-            ds[np.isin(self.point_ids, v, assume_unique=True)] = 1
+            set_ids = np.asarray(v, dtype=dtype_id)
+            if not _is_unique(set_ids):
+                msg = f"node set '{k}' contains duplicate ids"
+                raise ValueError(msg)
+            ds = np.isin(self.point_ids, set_ids, assume_unique=True).astype(
+                dtype_bool
+            )
             self.point_data[name] = ds
 
     def _fea_integration_points_to_cell_data(
@@ -281,8 +302,8 @@ class Mesh:
             # nodal data is obtained by averaging topology contributions
             np.add.at(accumulated, point_indices, values)
 
-        assert np.ndim(accumulated) == 1 + len(value_shape)
-        assert np.ndim(topology_count) == 1
+        assert accumulated.ndim == 1 + len(value_shape)
+        assert topology_count.ndim == 1
         # add singleton dimensions to 'topology_count' so that it
         # can broadcast to 'accumulated'
         topology_count_reshaped = topology_count[
