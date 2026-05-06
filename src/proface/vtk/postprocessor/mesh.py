@@ -98,10 +98,12 @@ class Mesh:
         delta: NDArrIds = self.point_ids - z_num
         if np.all(delta == delta[0]):
             d: dtype_id = delta[0]
+            logger.debug("remapping nodes with ∆ = -%d", d)
 
             def remap(i: NDArrIds) -> NDArrIds:
                 return i - d
         else:
+            logger.debug("remapping nodes with 'searchsorted'")
 
             def remap(i: NDArrIds) -> NDArrIds:
                 idx = np.searchsorted(self.point_ids, i)

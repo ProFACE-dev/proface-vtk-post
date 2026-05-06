@@ -65,14 +65,8 @@ def main() -> int:
     logging.basicConfig(
         level=config.log_level.value,
         format="%(message)s",
-        handlers=[
-            RichHandler(
-                console=Console(stderr=True),
-                rich_tracebacks=True,
-                show_path=False,
-                log_time_format="%Y-%m-%d %H:%M:%S",
-            )
-        ],
+        datefmt="[%Y-%m-%d %H:%M:%S]",
+        handlers=[RichHandler(console=Console(stderr=True), show_path=False)],
     )
 
     logger.info("\N{BLACK RIGHT-POINTING SMALL TRIANGLE} Translation started")
