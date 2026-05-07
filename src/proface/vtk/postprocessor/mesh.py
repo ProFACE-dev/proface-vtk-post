@@ -35,6 +35,16 @@ def _is_unique(ids: NDArrIds) -> bool:
     return ids.size == np.unique_values(ids).size
 
 
+def _patch_tensor_data(x: NDArrVals) -> NDArrVals:
+    """quick fix: vtk default component order in vectorized symmetric tensors
+    is different from the one enforced in proface-pre, version 0.3.0"""
+
+    if x.ndim == 2 and x.shape[1] == 6:
+        return x[:, [0, 1, 2, 3, 5, 4]]
+    else:
+        return x
+
+
 class Mesh:
     """Container for ProFACE mesh object, as saved in neutral h5 format"""
 
@@ -254,7 +264,8 @@ class Mesh:
             # axis2 (if present) -> vector/tensor component number
             values = np.asarray(ds, dtype=dtype_fl)
             # cell data is obtained by averaging over integration points
-            self.cell_data[name].append(np.mean(values, axis=1))
+            values = np.mean(values, axis=1)
+            self.cell_data[name].append(_patch_tensor_data(values))
 
     def _fea_nodal_average_to_point_data(
         self,
@@ -319,7 +330,7 @@ class Mesh:
         # and set to nan nodes with no results
         accumulated[topology_count == 0] = np.nan
 
-        self.point_data[name] = accumulated
+        self.point_data[name] = _patch_tensor_data(accumulated)
 
     def _build_fea_nodal_average_topology_mapping(
         self,
