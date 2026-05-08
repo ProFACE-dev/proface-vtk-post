@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025 ProFACE developers
+# SPDX-FileCopyrightText: 2025, 2026 ProFACE developers
 #
 # SPDX-License-Identifier: MIT
 

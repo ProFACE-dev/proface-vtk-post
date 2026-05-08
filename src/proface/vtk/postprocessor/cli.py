@@ -47,7 +47,7 @@ class Config:
     save_nodesets: bool = True
     """save nodesets as point data"""
 
-    save_fea_results: bool = False
+    save_fea_results: bool = True
     """save FEA results as cell and point data"""
 
     log_level: Loglevel = Loglevel.WARNING
