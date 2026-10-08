@@ -56,7 +56,7 @@ class Mesh:
         load_nodesets: bool = False,
     ) -> None:
         self.points: NDArrVals
-        self.point_ids: npt.NDArrIds
+        self.point_ids: NDArrIds
         self.point_data: dict[str, NDArrVals] = {}
         self.cells: list[tuple[str, NDArrIds]] = []
         self.cell_ids: list[NDArrIds] = []
@@ -162,7 +162,11 @@ class Mesh:
                         )
                         raise ValueError(msg)
                     cell_data.append(
-                        np.mean(np.asarray(ds, dtype=dtype_fl), axis=1)
+                        np.mean(
+                            np.asarray(ds, dtype=dtype_fl),
+                            axis=1,
+                            dtype=dtype_fl,
+                        )
                     )
                 if cell_data:
                     self.cell_data[name] = cell_data
@@ -266,7 +270,7 @@ class Mesh:
             # axis2 (if present) -> vector/tensor component number
             values = np.asarray(ds, dtype=dtype_fl)
             # cell data is obtained by averaging over integration points
-            values = np.mean(values, axis=1)
+            values = np.mean(values, axis=1, dtype=dtype_fl)
             self.cell_data[name].append(_patch_tensor_data(values))
 
     def _fea_nodal_average_to_point_data(
