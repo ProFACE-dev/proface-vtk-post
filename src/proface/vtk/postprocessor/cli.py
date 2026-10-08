@@ -38,7 +38,7 @@ class Config:
     fea: pathlib.Path
     """input FEA file (.h5)"""
 
-    pfa: pathlib.Path | None = None
+    pfa: tyro.conf.DisallowNone[pathlib.Path | None] = None
     """input PfA file (.h5) [optional]"""
 
     save_elsets: bool = True
@@ -61,7 +61,7 @@ def main() -> int:
     )
     _, remaining = parser.parse_known_args()
 
-    config = tyro.cli(Config, args=remaining)
+    config = tyro.cli(Config, args=remaining, compact_help=True)
     logging.basicConfig(
         level=config.log_level.value,
         format="%(message)s",
