@@ -148,22 +148,24 @@ class Mesh:
         for k in loc:
             for v in loc[k]:
                 name = f"{k}::{v}"
-                self.cell_data[name] = []
+                cell_data: list[NDArrVals] = []
                 for e, m in self.cells:
                     try:
                         ds = loc[k][v]["integration_point"][e]
-                    except KeyError as err:
-                        msg = f"Incomplete ProFACE results: {err}"
-                        raise ValueError(msg) from err
+                    except KeyError:
+                        logger.warning("No cell data for %s (%s)", name, e)
+                        continue
                     if len(ds) != len(m) or ds.ndim != 2:
                         msg = (
                             "Invalid ProFACE results "
                             f"'{k}/{v}/integration_point/{e}'"
                         )
                         raise ValueError(msg)
-                    self.cell_data[name].append(
+                    cell_data.append(
                         np.mean(np.asarray(ds, dtype=dtype_fl), axis=1)
                     )
+                if cell_data:
+                    self.cell_data[name] = cell_data
 
     def load_fea_results(self, h5: h5py.File) -> None:
         """load neutral FEA results from h5 file"""
