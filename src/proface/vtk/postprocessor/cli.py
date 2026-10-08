@@ -89,7 +89,7 @@ def main() -> int:
         try:
             with h5py.File(config.pfa) as h5:
                 logger.info("Parsing %s", config.pfa)
-                inmesh.load_results(h5)
+                inmesh.load_pfa_results(h5)
         except (OSError, ValueError) as err:
             logger.error("Unable to parse PfA file '%s'", config.pfa)  # noqa: TRY400
             logger.error("%s", err)  # noqa: TRY400

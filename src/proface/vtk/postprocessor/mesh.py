@@ -136,8 +136,8 @@ class Mesh:
         for k, c in self.cells:
             yield k, remap(c)
 
-    def load_results(self, h5: h5py.File) -> None:
-        """load Local results from h5 file"""
+    def load_pfa_results(self, h5: h5py.File) -> None:
+        """load Local PfA results from h5 file"""
 
         try:
             loc = h5["ProFACE"]["Local"]
@@ -148,28 +148,10 @@ class Mesh:
         for k in loc:
             for v in loc[k]:
                 name = f"{k}::{v}"
-                cell_data: list[NDArrVals] = []
-                for e, m in self.cells:
-                    try:
-                        ds = loc[k][v]["integration_point"][e]
-                    except KeyError:
-                        logger.warning("No cell data for %s (%s)", name, e)
-                        continue
-                    if len(ds) != len(m) or ds.ndim != 2:
-                        msg = (
-                            "Invalid ProFACE results "
-                            f"'{k}/{v}/integration_point/{e}'"
-                        )
-                        raise ValueError(msg)
-                    cell_data.append(
-                        np.mean(
-                            np.asarray(ds, dtype=dtype_fl),
-                            axis=1,
-                            dtype=dtype_fl,
-                        )
+                if "integration_point" in loc[k][v]:
+                    self._integration_points_to_cell_data(
+                        name, loc[k][v]["integration_point"]
                     )
-                if cell_data:
-                    self.cell_data[name] = cell_data
 
     def load_fea_results(self, h5: h5py.File) -> None:
         """load neutral FEA results from h5 file"""
@@ -195,7 +177,7 @@ class Mesh:
             for quantity, paths in results[load_case].items():
                 name = f"FEA::{load_case}::{quantity}"
                 if "integration_point" in paths:
-                    self._fea_integration_points_to_cell_data(
+                    self._integration_points_to_cell_data(
                         name,
                         paths["integration_point"],
                     )
@@ -247,22 +229,25 @@ class Mesh:
             )
             self.point_data[name] = ds
 
-    def _fea_integration_points_to_cell_data(
+    def _integration_points_to_cell_data(
         self,
         name: str,
         ip_group: h5py.Group,
     ) -> None:
         """average FEA integration-point data onto cells."""
 
+        if name in self.cell_data:
+            msg = f"Name '{name}' already present in cell data."
+            raise ValueError(msg)
         self.cell_data[name] = []
         for e, m in self.cells:
             try:
                 ds = ip_group[e]
             except KeyError as err:
-                msg = f"Incomplete FEA results: {err}"
+                msg = f"Incomplete Cell results: {err}"
                 raise ValueError(msg) from err
             if len(ds) != len(m) or ds.ndim < 2:
-                msg = f"Invalid FEA results '{ds.name}'"
+                msg = f"Invalid Cell results '{ds.name}'"
                 raise ValueError(msg)
             # data structure:
             # axis0 -> element number
