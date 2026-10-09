@@ -110,6 +110,15 @@ class Mesh:
         if load_nodesets:
             self._nodeset_to_point_data(h5)
 
+        # auxiliary structures for nodel averaging
+        (
+            self.nodal_average_point_indices,
+            self.nodal_average_topology_count,
+        ) = self._build_nodal_average_topology_mapping(h5)
+        self.point_data["DEBUG::nodal_topology_count"] = (
+            self.nodal_average_topology_count
+        )
+
     @property
     def n_points(self) -> int:
         return len(self.points)
@@ -152,6 +161,10 @@ class Mesh:
                     self._integration_points_to_cell_data(
                         name, loc[k][v]["integration_point"]
                     )
+                if "nodal_averaged" in loc[k][v]:
+                    self._nodal_average_to_point_data(
+                        name, loc[k][v]["nodal_averaged"]
+                    )
 
     def load_fea_results(self, h5: h5py.File) -> None:
         """load neutral FEA results from h5 file"""
@@ -166,13 +179,6 @@ class Mesh:
             msg = "Cannot load FEA results without cells"
             raise ValueError(msg)
 
-        (
-            nodal_average_point_indices,
-            nodal_average_topology_count,
-        ) = self._build_fea_nodal_average_topology_mapping(h5)
-        self.point_data["DEBUG::nodal_topology_count"] = (
-            nodal_average_topology_count
-        )
         for load_case in results:
             for quantity, paths in results[load_case].items():
                 name = f"FEA::{load_case}::{quantity}"
@@ -182,11 +188,9 @@ class Mesh:
                         paths["integration_point"],
                     )
                 if "nodal_averaged" in paths:
-                    self._fea_nodal_average_to_point_data(
+                    self._nodal_average_to_point_data(
                         name,
                         paths["nodal_averaged"],
-                        nodal_average_point_indices,
-                        nodal_average_topology_count,
                     )
 
     def _elset_to_cell_data(self, h5: h5py.File) -> None:
@@ -258,14 +262,17 @@ class Mesh:
             values = np.mean(values, axis=1, dtype=dtype_fl)
             self.cell_data[name].append(_patch_tensor_data(values))
 
-    def _fea_nodal_average_to_point_data(
+    def _nodal_average_to_point_data(
         self,
         name: str,
         nd_group: h5py.Group,
-        point_indices_by_topology: tuple[NDArrIds, ...],
-        topology_count: NDArrIds,
     ) -> None:
         """merge topology-specific FEA nodal averages as point data."""
+
+        point_indices_by_topology: tuple[NDArrIds, ...] = (
+            self.nodal_average_point_indices
+        )
+        topology_count: NDArrIds = self.nodal_average_topology_count
 
         first_topology, _ = self.cells[0]
         try:
@@ -323,7 +330,7 @@ class Mesh:
 
         self.point_data[name] = _patch_tensor_data(accumulated)
 
-    def _build_fea_nodal_average_topology_mapping(
+    def _build_nodal_average_topology_mapping(
         self,
         h5: h5py.File,
     ) -> tuple[tuple[NDArrIds, ...], NDArrIds]:
@@ -335,7 +342,7 @@ class Mesh:
             try:
                 nodes = h5["elements"][e]["nodes"]
             except KeyError as err:
-                msg = f"Incomplete FEA results: {err}"
+                msg = f"Incomplete FEA mesh: {err}"
                 raise ValueError(msg) from err
 
             point_indices = self._point_indices(
@@ -356,6 +363,6 @@ class Mesh:
                 self.point_ids[indices] != point_ids
             )  # insertion point not index of point_ids
         ):
-            msg = "FEA result references unknown node ids"
+            msg = "FEA mesh references unknown node ids"
             raise ValueError(msg)
         return indices
